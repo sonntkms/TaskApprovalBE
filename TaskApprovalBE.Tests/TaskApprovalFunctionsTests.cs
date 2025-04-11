@@ -37,12 +37,6 @@ public class TaskApprovalFunctionsTests
     }
 
     [Fact]
-    public void Test1()
-    {
-
-    }
-
-    [Fact]
     public async Task SendStartedEmail_ShouldSendCorrectEmail()
     {
         // Arrange
