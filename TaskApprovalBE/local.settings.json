@@ -1,0 +1,12 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "AzureCommunication:ConnectionString": "endpoint=https://<your-resource-name>.communication.azure.com/;accesskey=<your-access-key>",
+    "AzureCommunication:SenderAddress": "DoNotReply@<your-verified-domain>.com"
+  },
+  "Host": {
+    "CORS": "*"
+  }
+}
