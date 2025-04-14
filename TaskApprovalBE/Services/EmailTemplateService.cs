@@ -45,7 +45,5 @@ namespace TaskApprovalBE.Services
             var template = Handlebars.Compile(templateContent);
             return template(model);
         }
-
-
     }
 }
