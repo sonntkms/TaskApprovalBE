@@ -1,4 +1,3 @@
-
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -6,255 +5,183 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.DurableTask;
 using Microsoft.DurableTask.Client;
-using Microsoft.Extensions.Logging;
 using Moq;
 using TaskApprovalBE.Models;
 using TaskApprovalBE.Services;
 using TaskApprovalBE.Tests.Helpers;
 
-
-namespace TaskApprovalBE.Tests;
-
-public class TaskApprovalFunctionsTests
+namespace TaskApprovalBE.Tests
 {
-    private readonly Mock<IEmailService> _mockEmailService;
-    private readonly Mock<ILogger<TaksApprovalFunctions>> _mockLogger;
-    private readonly TaksApprovalFunctions _functions;
-
-    public TaskApprovalFunctionsTests()
+    public class TaksApprovalFunctionsTests
     {
-        _mockEmailService = new Mock<IEmailService>();
-        _mockLogger = new Mock<ILogger<TaksApprovalFunctions>>();
-        _functions = new TaksApprovalFunctions(_mockEmailService.Object, _mockLogger.Object);
-    }
+        private readonly Mock<IApprovalOrchestrationService> _mockService;
+        private readonly TaksApprovalFunctions _functions;
 
-    private static Mock<HttpRequest> CreateMockHttpRequest(string content)
-    {
-        var memoryStream = new MemoryStream(Encoding.UTF8.GetBytes(content));
-        var mockRequest = new Mock<HttpRequest>();
-        mockRequest.Setup(r => r.Body).Returns(memoryStream);
-        return mockRequest;
-    }
-
-    [Fact]
-    public async Task SendStartedEmail_ShouldSendCorrectEmail()
-    {
-        // Arrange
-        var request = new ApprovalRequest
+        public TaksApprovalFunctionsTests()
         {
-            Id = Guid.NewGuid().ToString(),
-            UserEmail = "user@example.com",
-            TaskName = "Test Task"
-        };
-        var mockFunctionContext = new Mock<FunctionContext>();
+            _mockService = new Mock<IApprovalOrchestrationService>();
+            _functions = new TaksApprovalFunctions(_mockService.Object);
+        }
 
-        // Act
-        await _functions.SendStartedEmail(request, mockFunctionContext.Object);
-
-        // Assert
-        _mockEmailService.Verify(
-            s => s.SendEmailAsync(
-                "user@example.com",
-                $"Approval Process Started for {request.TaskName}",
-                It.Is<string>(content => content.Contains(request.Id) && content.Contains(request.TaskName))
-            ),
-            Times.Once
-        );
-    }
-
-    [Fact]
-    public async Task SendApprovedEmail_ShouldSendCorrectEmail()
-    {
-        // Arrange
-        var request = new ApprovalRequest
+        [Fact]
+        public async Task SendStartedEmail_CallsNotifyApprovalStartedAsync()
         {
-            Id = Guid.NewGuid().ToString(),
-            UserEmail = "user@example.com",
-            TaskName = "Test Task"
-        };
-        var mockFunctionContext = new Mock<FunctionContext>();
+            // Arrange
+            var request = new ApprovalRequest { Id = "req-123", TaskName = "Test Task" };
+            var functionContext = new Mock<FunctionContext>().Object;
 
-        // Act
-        await _functions.SendApprovedEmail(request, mockFunctionContext.Object);
+            // Act
+            await _functions.SendStartedEmail(request, functionContext);
 
-        // Assert
-        _mockEmailService.Verify(
-            s => s.SendEmailAsync(
-                "user@example.com",
-                $"Your Request Has Been Approved for {request.TaskName}",
-                It.Is<string>(content => content.Contains(request.Id) && content.Contains(request.TaskName))
-            ),
-            Times.Once
-        );
-    }
+            // Assert
+            _mockService.Verify(s => s.NotifyApprovalStartedAsync(request), Times.Once);
+        }
 
-    [Fact]
-    public async Task SendRejectedEmail_ShouldSendCorrectEmail()
-    {
-        // Arrange
-        var request = new ApprovalRequest
+        [Fact]
+        public async Task SendApprovedEmail_CallsNotifyApprovalCompletedAsync()
         {
-            Id = Guid.NewGuid().ToString(),
-            UserEmail = "user@example.com",
-            TaskName = "Test Task"
-        };
-        var mockFunctionContext = new Mock<FunctionContext>();
+            // Arrange
+            var request = new ApprovalRequest { Id = "req-123", TaskName = "Test Task" };
+            var functionContext = new Mock<FunctionContext>().Object;
 
-        // Act
-        await _functions.SendRejectedEmail(request, mockFunctionContext.Object);
+            // Act
+            await _functions.SendApprovedEmail(request, functionContext);
 
-        // Assert
-        _mockEmailService.Verify(
-            s => s.SendEmailAsync(
-                "user@example.com",
-                $"Your Request Has Been Rejected for {request.TaskName}",
-                It.Is<string>(content => content.Contains(request.Id) && content.Contains(request.TaskName))
-            ),
-            Times.Once
-        );
-    }
-    
-    [Fact]
-    public async Task RunOrchestrationAsync_WhenRequestIsNull_ShouldThrowArgumentNullException()
-    {
-        // Arrange
-        var mockContext = new Mock<TaskOrchestrationContext>();
+            // Assert
+            _mockService.Verify(s => s.NotifyApprovalCompletedAsync(request), Times.Once);
+        }
 
-        // Act & Assert
-        await Assert.ThrowsAsync<ArgumentNullException>(() => _functions.RunOrchestrationAsync(mockContext.Object, null));
-    }
-
-    [Fact]
-    public async Task RunOrchestrationAsync_WhenApproved_ShouldCallCorrectActivities()
-    {
-        // Arrange
-        var request = new ApprovalRequest
+        [Fact]
+        public async Task SendRejectedEmail_CallsNotifyApprovalRejectedAsync()
         {
-            Id = "test-id",
-            UserEmail = "user@example.com",
-            TaskName = "Test Task"
-        };
+            // Arrange
+            var request = new ApprovalRequest { Id = "req-123", TaskName = "Test Task" };
+            var functionContext = new Mock<FunctionContext>().Object;
 
-        var mockContext = new Mock<TaskOrchestrationContext>();
+            // Act
+            await _functions.SendRejectedEmail(request, functionContext);
 
-        mockContext
-            .Setup(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendStartedEmail), request, null))
-            .Returns(Task.CompletedTask);
+            // Assert
+            _mockService.Verify(s => s.NotifyApprovalRejectedAsync(request), Times.Once);
+        }
 
-        mockContext
-            .Setup(ctx => ctx.WaitForExternalEvent<ApprovalResult>(TaksApprovalFunctions.APPROVAL_EVENT_NAME, default(CancellationToken)))
-            .ReturnsAsync(new ApprovalResult { IsApproved = true });
-
-        mockContext
-            .Setup(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendApprovedEmail), request, null))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _functions.RunOrchestrationAsync(mockContext.Object, request);
-
-        // Assert
-        Assert.Equal(ApprovalOrchestrationResult.APPROVED, result);
-        mockContext.Verify(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendStartedEmail), request, null), Times.Once);
-        mockContext.Verify(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendApprovedEmail), request, null), Times.Once);
-        mockContext.Verify(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendRejectedEmail), request, null), Times.Never);
-    }
-
-    [Fact]
-    public async Task RunOrchestrationAsync_WhenRejected_ShouldCallCorrectActivities()
-    {
-        // Arrange
-        var request = new ApprovalRequest
+        [Fact]
+        public async Task RunOrchestrationAsync_CallsServiceWithContext()
         {
-            Id = "test-id",
-            UserEmail = "user@example.com",
-            TaskName = "Test Task"
-        };
+            // Arrange
+            var request = new ApprovalRequest { Id = "req-123", TaskName = "Test Task" };
+            var mockContext = new Mock<TaskOrchestrationContext>();
+            _mockService.Setup(s => s.RunOrchestrationAsync(It.IsAny<TaskOrchestrationContext>(), It.IsAny<ApprovalRequest>()))
+                .ReturnsAsync("orchestration-123");
 
-        var mockContext = new Mock<TaskOrchestrationContext>();
+            // Act
+            var result = await _functions.RunOrchestrationAsync(mockContext.Object, request);
 
-        mockContext
-            .Setup(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendStartedEmail), request, null))
-            .Returns(Task.CompletedTask);
+            // Assert
+            Assert.Equal("orchestration-123", result);
+            _mockService.Verify(s => s.RunOrchestrationAsync(mockContext.Object, request), Times.Once);
+        }
 
-        mockContext
-            .Setup(ctx => ctx.WaitForExternalEvent<ApprovalResult>(TaksApprovalFunctions.APPROVAL_EVENT_NAME, default(CancellationToken)))
-            .ReturnsAsync(new ApprovalResult { IsApproved = false });
-
-        mockContext
-            .Setup(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendRejectedEmail), request, null))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _functions.RunOrchestrationAsync(mockContext.Object, request);
-
-        // Assert
-        Assert.Equal(ApprovalOrchestrationResult.REJECTED, result);
-        mockContext.Verify(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendStartedEmail), request, null), Times.Once);
-        mockContext.Verify(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendApprovedEmail), request, null), Times.Never);
-        mockContext.Verify(ctx => ctx.CallActivityAsync(nameof(TaksApprovalFunctions.SendRejectedEmail), request, null), Times.Once);
-    }
-
-    [Fact]
-    public async Task StartApproval_WithValidRequest_ShouldStartOrchestration()
-    {
-        // Arrange
-        var request = new ApprovalRequest
+        private HttpRequest CreateMockHttpRequest(string jsonContent)
         {
-            Id = "test-id",
-            UserEmail = "user@example.com",
-            TaskName = "Test Task"
-        };
+            var stream = new MemoryStream(Encoding.UTF8.GetBytes(jsonContent));
+            var mockRequest = new Mock<HttpRequest>();
+            mockRequest.Setup(r => r.Body).Returns(stream);
+            return mockRequest.Object;
+        }
 
-        var requestJson = JsonSerializer.Serialize(request);
-        var mockHttpRequest = CreateMockHttpRequest(requestJson);
+        [Fact]
+        public async Task StartApproval_ReturnsOkResult_WhenSuccessful()
+        {
+            // Arrange
+            var request = new ApprovalRequest { Id = "req-123", TaskName = "Test Task" };
+            var jsonContent = JsonSerializer.Serialize(request);
+            var mockRequest = CreateMockHttpRequest(jsonContent);
 
-        var mockDurableClient = new Mock<FakeDurableTaskClient>();
-        mockDurableClient
-            .Setup(c => c.ScheduleNewOrchestrationInstanceAsync("ApprovalOrchestration", request, null, default(CancellationToken)))
-            .ReturnsAsync("test-instance-id");
+            var mockClient = new Mock<FakeDurableTaskClient>();
 
-        // Act
-        var result = await _functions.StartApproval(mockHttpRequest.Object, mockDurableClient.Object);
+            var expectedResponse = new ResponseMessage("instance-123", "Success");
+            _mockService.Setup(s => s.StartApprovalRequestAsync(It.IsAny<DurableTaskClient>(), It.IsAny<ApprovalRequest>()))
+                .ReturnsAsync(expectedResponse);
 
-        // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        mockDurableClient.Verify(c => c.ScheduleNewOrchestrationInstanceAsync("ApprovalOrchestration", It.IsAny<ApprovalRequest>(), null, default(CancellationToken)), Times.Once);
+            // Act
+            var result = await _functions.StartApproval(mockRequest, mockClient.Object);
+
+            // Assert
+            var okResult = Assert.IsType<OkObjectResult>(result);
+            var responseValue = Assert.IsType<ResponseMessage>(okResult.Value);
+            Assert.Equal(expectedResponse.InstanceId, responseValue.InstanceId);
+            Assert.Equal(expectedResponse.Message, responseValue.Message);
+        }
+
+        [Fact]
+        public async Task StartApproval_ReturnsBadRequest_WhenInstanceIdIsEmpty()
+        {
+            // Arrange
+            var request = new ApprovalRequest { Id = "req-123", TaskName = "Test Task" };
+            var jsonContent = JsonSerializer.Serialize(request);
+            var mockRequest = CreateMockHttpRequest(jsonContent);
+
+            var mockClient = new Mock<FakeDurableTaskClient>();
+
+            var expectedResponse = new ResponseMessage("Error");
+            _mockService.Setup(s => s.StartApprovalRequestAsync(It.IsAny<DurableTaskClient>(), It.IsAny<ApprovalRequest>()))
+                .ReturnsAsync(expectedResponse);
+
+            // Act
+            var result = await _functions.StartApproval(mockRequest, mockClient.Object);
+
+            // Assert
+            var badResult = Assert.IsType<BadRequestObjectResult>(result);
+            var responseValue = Assert.IsType<ResponseMessage>(badResult.Value);
+            Assert.Equal(expectedResponse.Message, responseValue.Message);
+        }
+
+        [Fact]
+        public async Task Approve_ReturnsOkResult_WhenSuccessful()
+        {
+            // Arrange
+            var request = new ApprovalActionRequest { InstanceId = "instance-123" };
+            var jsonContent = JsonSerializer.Serialize(request);
+            var mockRequest = CreateMockHttpRequest(jsonContent);
+            var mockClient = new Mock<FakeDurableTaskClient>();
+
+            var expectedResponse = new ResponseMessage("instance-123", "Success");
+            _mockService.Setup(s => s.PerformApprovalActionAsync(It.IsAny<DurableTaskClient>(), It.IsAny<ApprovalActionRequest>(), true))
+                .ReturnsAsync(expectedResponse);
+
+            // Act
+            var result = await _functions.Approve(mockRequest, mockClient.Object);
+
+            // Assert
+            var okResult = Assert.IsType<OkObjectResult>(result);
+            var responseValue = Assert.IsType<ResponseMessage>(okResult.Value);
+            Assert.Equal(expectedResponse.InstanceId, responseValue.InstanceId);
+            Assert.Equal(expectedResponse.Message, responseValue.Message);
+        }
+
+        [Fact]
+        public async Task Reject_ReturnsOkResult_WhenSuccessful()
+        {
+            // Arrange
+            var request = new ApprovalActionRequest { InstanceId = "instance-123" };
+            var jsonContent = JsonSerializer.Serialize(request);
+            var mockRequest = CreateMockHttpRequest(jsonContent);
+
+            var mockClient = new Mock<FakeDurableTaskClient>();
+
+            var expectedResponse = new ResponseMessage("instance-123", "Rejected Successfullly");
+            _mockService.Setup(s => s.PerformApprovalActionAsync(It.IsAny<DurableTaskClient>(), It.IsAny<ApprovalActionRequest>(), false))
+                .ReturnsAsync(expectedResponse);
+
+            // Act
+            var result = await _functions.Reject(mockRequest, mockClient.Object);
+
+            // Assert
+            var okResult = Assert.IsType<OkObjectResult>(result);
+            var responseValue = Assert.IsType<ResponseMessage>(okResult.Value);
+            Assert.Equal(expectedResponse.InstanceId, responseValue.InstanceId);
+            Assert.Equal(expectedResponse.Message, responseValue.Message);
+        }
     }
-
-    [Fact]
-    public async Task Reject_WithCompletedInstance_ShouldReturnAlreadyCompleted()
-    {
-        // Arrange
-        var action = new ApprovalAction { InstanceId = "test-instance-id" };
-        var requestJson = JsonSerializer.Serialize(action);
-        var mockHttpRequest = CreateMockHttpRequest(requestJson);
-
-        var mockDurableClient = new Mock<FakeDurableTaskClient>();
-        mockDurableClient
-            .Setup(c => c.GetInstanceAsync(action.InstanceId, false, default(CancellationToken)))
-            .ReturnsAsync(new OrchestrationMetadata(Guid.NewGuid().ToString(), action.InstanceId)
-            {
-                RuntimeStatus = OrchestrationRuntimeStatus.Completed
-            });
-
-        // Act
-        var result = await _functions.Reject(mockHttpRequest.Object, mockDurableClient.Object);
-
-        // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        var response = Assert.IsType<ResponseMessage>(okResult.Value);
-        Assert.Equal("Orchestration Instance was already Completed.", response.Message);
-        mockDurableClient.Verify(
-            c => c.RaiseEventAsync(
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<object?>(),
-                default(CancellationToken)
-            ),
-            Times.Never
-        );
-    }
-
-
-
 }
