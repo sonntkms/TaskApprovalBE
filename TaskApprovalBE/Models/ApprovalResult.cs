@@ -9,5 +9,6 @@ namespace TaskApprovalBE.Models
     {
         public const string APPROVED = "Approved";
         public const string REJECTED = "Rejected";
+        public const string TIMED_OUT = "TimedOut";
     }
 }

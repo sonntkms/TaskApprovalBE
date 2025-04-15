@@ -1,5 +1,6 @@
 using Microsoft.DurableTask;
 using Microsoft.DurableTask.Client;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 using TaskApprovalBE.Infrastructure.Email;
@@ -14,6 +15,7 @@ namespace TaskApprovalBE.Tests.Services
         private readonly Mock<IEmailClient> _mockEmailClient;
         private readonly Mock<IEmailTemplateService> _mockEmailTemplateService;
         private readonly Mock<ILogger<ApprovalOrchestrationService>> _mockLogger;
+        private readonly Mock<IConfiguration> _mockConfig;
         private readonly ApprovalOrchestrationService _service;
 
         public ApprovalOrchestrationServiceTests()
@@ -21,11 +23,19 @@ namespace TaskApprovalBE.Tests.Services
             _mockEmailClient = new Mock<IEmailClient>();
             _mockEmailTemplateService = new Mock<IEmailTemplateService>();
             _mockLogger = new Mock<ILogger<ApprovalOrchestrationService>>();
+            _mockConfig = new Mock<IConfiguration>();
+            // _mockConfig
+            //     .Setup(c => c.GetValue<int?>(nameof(IApprovalOrchestrationService.DEFAULT_ORCHESTRATION_TIMEOUT)))
+            //     .Returns(0); // Set a timeout value for the test
+            _mockConfig.SetupGet(c => c[nameof(IApprovalOrchestrationService.DEFAULT_ORCHESTRATION_TIMEOUT)])
+                .Returns("6"); // Set a timeout value for the test
+
 
             _service = new ApprovalOrchestrationService(
                 _mockEmailClient.Object,
                 _mockEmailTemplateService.Object,
-                _mockLogger.Object
+                _mockLogger.Object,
+                _mockConfig.Object
             );
         }
 
@@ -132,6 +142,32 @@ namespace TaskApprovalBE.Tests.Services
                 Times.Once);
         }
 
+        [Fact]
+        public async Task RunOrchestrationAsync_ShouldReturnTimedOut_WhenTimeoutOccurs()
+        {
+            // Arrange
+            var request = new ApprovalRequest { UserEmail = "test@example.com", TaskName = "Test Task", Id = "123" };
+            var mockContext = new Mock<TaskOrchestrationContext>();
+
+            mockContext
+                .Setup(context => context.CurrentUtcDateTime)
+                .Returns(DateTime.UtcNow);
+
+            mockContext
+                .Setup(context => context.CreateTimer(It.IsAny<DateTime>(), CancellationToken.None))
+                .Returns(Task.Delay(1));
+
+            mockContext
+                .Setup(context => context.WaitForExternalEvent<ApprovalResult>(IApprovalOrchestrationService.APPROVAL_EVENT_NAME, default(CancellationToken)))
+                .Returns(new TaskCompletionSource<ApprovalResult>().Task);
+
+            // Act
+            var result = await _service.RunOrchestrationAsync(mockContext.Object, request);
+
+            // Assert
+            Assert.Equal(ApprovalOrchestrationResult.TIMED_OUT, result);
+            mockContext.Verify(context => context.CallActivityAsync(IApprovalOrchestrationService.REJECTED_NOTIFICATION_ACTIVITY_NAME, request, null), Times.Once);
+        }
 
         [Fact]
         public async Task RunOrchestrationAsync_WhenApproved_CallsApprovedNotification()
@@ -146,7 +182,14 @@ namespace TaskApprovalBE.Tests.Services
 
             var mockContext = new Mock<TaskOrchestrationContext>();
 
-            // Set up the WaitForExternalEvent to return an approved result
+            mockContext
+                .Setup(context => context.CurrentUtcDateTime)
+                .Returns(DateTime.UtcNow);
+
+            mockContext
+                .Setup(context => context.CreateTimer(It.IsAny<DateTime>(), CancellationToken.None))
+                .Returns(new TaskCompletionSource<object>().Task);
+
             mockContext
                 .Setup(c => c.WaitForExternalEvent<ApprovalResult>(IApprovalOrchestrationService.APPROVAL_EVENT_NAME, default(CancellationToken)))
                 .ReturnsAsync(new ApprovalResult { IsApproved = true });
@@ -188,6 +231,14 @@ namespace TaskApprovalBE.Tests.Services
             };
 
             var mockContext = new Mock<TaskOrchestrationContext>();
+
+            mockContext
+                .Setup(context => context.CurrentUtcDateTime)
+                .Returns(DateTime.UtcNow);
+
+            mockContext
+                .Setup(context => context.CreateTimer(It.IsAny<DateTime>(), CancellationToken.None))
+                .Returns(new TaskCompletionSource<object>().Task); // Simulate no timeout
 
             // Set up the WaitForExternalEvent to return a rejected result
             mockContext

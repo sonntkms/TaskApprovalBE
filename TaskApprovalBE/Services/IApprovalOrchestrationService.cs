@@ -14,6 +14,7 @@ namespace TaskApprovalBE.Services
         const string START_APPROVAL_TRIGGER_NAME = "StartApproval";
         const string APPROVE_TRIGGER_NAME = "Approve";
         const string REJECT_TRIGGER_NAME = "Reject";
+        const int DEFAULT_ORCHESTRATION_TIMEOUT = 6; // 6 months
 
         Task NotifyApprovalStartedAsync(ApprovalRequest request);
         Task NotifyApprovalCompletedAsync(ApprovalRequest request);
